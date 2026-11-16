@@ -1,6 +1,7 @@
 import { Column, CreateDateColumn, Entity, Index, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
 import { ProductStatus } from "../enum/product-status.enum.js";
 import { OrderItem } from "../../orders/entities/order-item.entity.js";
+import { ModifierGroup } from "../../modifier/entities/modifier.group.entity.js";
 
 @Entity('products')
 
@@ -51,5 +52,11 @@ status: ProductStatus;
     @OneToMany(()=> OrderItem ,
      (orderItem) => orderItem.product)
     orderItems :OrderItem[]
+
+    @OneToMany(
+        'ModifierGroup',
+      (modifierGroup : ModifierGroup) => modifierGroup.product
+    )
+    modifiergroups : ModifierGroup[]
 
 }

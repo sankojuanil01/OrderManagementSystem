@@ -4,11 +4,13 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 
 import type { Order } from './order.entity.js';
 import type { Product } from '../../products/entities/product.entity.js';
+import { OrderItemModifier } from './order-item-modifier.entity.js';
 
 @Entity('order_items')
 
@@ -51,4 +53,11 @@ export class OrderItem {
     scale: 2,
   })
   price: number;
+
+@OneToMany(
+  'OrderItemModifier',
+  (modifier: OrderItemModifier) => modifier.orderItem,
+  { cascade: true },
+)
+modifiers!: OrderItemModifier[];
 }

@@ -1,5 +1,5 @@
 import { ApiProperty } from "@nestjs/swagger";
-import { IsInt, Min } from "class-validator";
+import { ArrayUnique, IsArray, isInt, IsInt, IsOptional, Min } from "class-validator";
 
 export class CreateOrderItemDto {
 
@@ -18,4 +18,12 @@ export class CreateOrderItemDto {
   @IsInt()
   @Min(1)
   quantity: number;
+
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsInt({each : true})
+  @Min(1, {each : true})
+  modifierIds? : string[]
 }

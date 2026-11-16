@@ -11,9 +11,9 @@ export const orderManagementDataSource =  new DataSource({
 
   ...databaseConfig,
 
-  entities: [User,Product,Order,OrderItem],
+  // entities: [User,Product,Order,OrderItem],
 
-// entities : ['dist/**/*.entity.js'],
+entities : ['dist/**/*.entity.js'],
 
   migrations: ['dist/migrations/*.js'],
   logging: true,

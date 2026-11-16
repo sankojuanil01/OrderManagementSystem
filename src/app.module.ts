@@ -13,6 +13,7 @@ import { databaseConfig } from './database/database.config.js';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
+import { ModifierModule } from './modifier/modifier.module.js';
 
 
 
@@ -32,7 +33,8 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
     }),
 
     ProductsModule,
-    OrdersModule
+    OrdersModule,
+    ModifierModule
   ],
   controllers: [AppController],
   providers: [AppService,

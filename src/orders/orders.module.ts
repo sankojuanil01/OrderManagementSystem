@@ -7,6 +7,7 @@ import { User } from '../users/entities/user.entity.js';
 import { OrdersController } from './orders.controller.js';
 import { OrdersService } from './orders.service.js';
 import { AuthModule } from '../auth/auth.module.js';
+import { OrderItemModifier } from './entities/order-item-modifier.entity.js';
 
 
 
@@ -17,6 +18,7 @@ import { AuthModule } from '../auth/auth.module.js';
       OrderItem,
       Product,
       User,
+      OrderItemModifier
     ]),
     AuthModule
   ],
