@@ -1,0 +1,117 @@
+Order Management System
+Objective
+Build a REST API using NestJS + PostgreSQL + TypeORM for a simple Order Management System.
+1. Authentication & Users
+Create APIs for:
+User registration
+User login
+Get logged-in user profile
+Requirements:
+Use JWT authentication.
+Passwords must be hashed.
+Create USER and ADMIN roles.
+Protect APIs using Guards.
+2. Products
+Create Product APIs:
+POST   /products
+GET    /products
+GET    /products/:id
+PATCH  /products/:id
+DELETE /products/:id
+Product fields:
+id
+name
+description
+price
+stock
+status
+created_at
+updated_at
+Requirements:
+Product name is mandatory.
+Price must be greater than 0.
+Stock cannot be negative.
+Only ADMIN can create/update/delete products.
+Users can view products.
+3. Orders
+Create:
+POST   /orders
+GET    /orders
+GET    /orders/:id
+PATCH  /orders/:id/status
+Tables:
+orders
+order_items
+products
+users
+Order example:
+Order
+ ├── User
+ └── Order Items
+       ├── Product
+       ├── Quantity
+       └── Price 
+When creating an order:
+Validate products.
+Check product stock.
+Calculate item totals.
+Calculate order total.
+Reduce product stock.
+Create order and order items.
+All operations must happen inside a database transaction.
+4. Order Status
+Use:
+PENDING
+CONFIRMED
+CANCELLED
+COMPLETED
+Implement proper status transition validation.
+For example:
+PENDING → CONFIRMED
+CONFIRMED → COMPLETED
+PENDING → CANCELLED
+CONFIRMED → CANCELLED
+Invalid transitions should return an appropriate error.
+5. API Requirements
+Use:
+DTOs
+class-validator  
+ValidationPipe
+Guards
+Exception filters where appropriate
+Proper HTTP status codes
+Pagination
+Sorting
+Search/filtering
+Example:
+GET /products?page=1&limit=10&search=burger&sortBy=price&sortOrder=DESC
+6. Database
+Use PostgreSQL + TypeORM.
+Create proper:
+Entities
+Primary/foreign keys
+Relationships
+Indexes where required
+Migrations
+Do not use synchronize: true.
+7. Error Handling
+API responses should be consistent.
+Example:
+{
+  "success": false,
+  "message": "Insufficient product stock",
+  "data": null}
+Success:
+{
+  "success": true,
+  "message": "Order created successfully",
+  "data": {}
+}
+8. Swagger
+Add Swagger documentation for all APIs.
+Document:
+Request body
+Query parameters
+Path parameters
+Response structure
+Authentication
