@@ -19,6 +19,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { OrderMapper } from './mappers/order.mapper.js';
 import type { AuthenticatedUser } from '../auth/interface/authenticated-user.interface.js';
 import { RejectedOrderItem } from './interface/rejectedOrderItem.interface.js';
+import { ModifierGroup } from '../modifier/entities/modifier.group.entity.js';
+import { Modifier } from '../modifier/entities/modifier.entity.js';
+import { OrderItemModifier } from './entities/order-item-modifier.entity.js';
 
 @Injectable()
 export class OrdersService {
@@ -88,13 +91,26 @@ async createOrder(
 
     //  Merge duplicate product IDs
     // A Map stores data as key-value pairs 
-    const mergedItems = new Map<number, number>();
+    const mergedItems = new Map<
+    string ,
+    {
+      productId : number;
+      quantity : number;
+      modifierIds : string[]
+    }
+    >();
 
 
     for (const item of createOrderDto.items) {
+
+      const modifierIds = [...(item.modifierIds ?? [])].sort();
+
+      const key = `${item.productId} : ${modifierIds.join(',')}`;
+
+      const existingItem = mergedItems.get(key)
     
       const quantity =
-        (mergedItems.get(item.productId) ?? 0) +
+        (existingItem?.productId ?? 0) +
         item.quantity;
 
       if (!Number.isSafeInteger(quantity)) {
@@ -103,12 +119,22 @@ async createOrder(
         );
       }
 
-      mergedItems.set(item.productId, quantity);
+      mergedItems.set(key, {
+        productId : item.productId,
+        quantity,
+        modifierIds
+      });
     }
 
 
-    // Fetch all existing products and lock their rows
-    const productIds = [...mergedItems.keys()];
+    // Fetch all products and lock their rows
+    const productIds = [
+      ... new Set(
+    [...mergedItems.values()].map(
+      (item) => item.productId,
+    ),
+  ),
+];
 
       const products = await manager.find(Product,{
         where: { id: In(productIds) },
@@ -127,22 +153,71 @@ async createOrder(
       products.map((product) => [product.id, product]),
     );
 
+    // fetch modifier groups 
+
+    const modifierGroups = await manager.find(ModifierGroup, {
+      where : {
+        product : {
+          id : In(productIds)
+        },
+      },
+      relations : {
+        product : true
+      }
+    })
+
+    // fetch selected modifiers
+
+    const allModifierIds = [
+      ...new Set(
+        [...mergedItems.values()].flatMap(
+          (item) => item.modifierIds
+        ),
+      ),
+    ];
+
+    const modifierMap = new Map<string , Modifier>();
+
+    if(allModifierIds.length > 0) {
+      const modifiers = await manager.find(Modifier , {
+        where : {
+          id : In(allModifierIds)
+        },
+        relations : {
+          group : {
+            product : true
+          }
+        }
+      })
+      for (const modifier of modifiers) {
+        modifierMap.set(modifier.id,modifier)
+      }
+    }
+
+    
+
     const rejectedItems: RejectedOrderItem[] = [];
 
     const orderItems: OrderItem[] = [];
 
     const updatedProducts: Product[] = [];
 
+    const validItems : {
+      product : Product,
+      quantity : number,
+      modifiers : Modifier[]
+    }[] = []
+
     let total = 0;
 
         // Products & Stock Validation
-    for (const [productId, quantity] of mergedItems) {
+    for (const item of mergedItems.values()) {
 
-      const product = productMap.get(productId);
+      const product = productMap.get(item.productId);
 
       if (!product) {
         rejectedItems.push({
-          productId,
+          productId : item.productId,
           productName : null,
           reason : "Product not found"
         });
@@ -151,61 +226,323 @@ async createOrder(
 
       if (product.status !== ProductStatus.ACTIVE) {
         rejectedItems.push({
-          productId,
+          productId: item.productId,
           productName : product.name,
           reason : `Product ${product.name} is inactive`
         });
         continue;
       }
 
-      if (product.stock < quantity) {
+      if (product.stock < item.quantity) {
         rejectedItems.push({
-          productId,
+          productId: item.productId,
           productName : product.name,
-          reason: `Insufficient stock for "${product.name}". Available Stock : ${product.stock}, Requested quantity : ${quantity}`,
+          reason: `Insufficient stock for "${product.name}". Available Stock : ${product.stock}, Requested quantity : ${item.quantity}`,
         })
 
         continue
       }
 
-      // calculate price and item total 
-      const price = Number(product.price);
- 
-      const itemTotal = price * quantity;
+      const selectedModifiers: Modifier[] = [];
+
+      let invalidModifier = false;
+
+      // Check duplicate modifier IDs
+
+      if (
+        new Set(item.modifierIds).size !==
+        item.modifierIds.length
+      ) {
+
+        rejectedItems.push({
+          productId: item.productId,
+          productName: product.name,
+          reason: 'Duplicate modifiers are not allowed',
+        });
+
+        continue;
+      }
+
+      // Validate selected modifiers
+
+      for (const modifierId of item.modifierIds) {
+
+        const modifier = modifierMap.get(modifierId);
+
+        if (!modifier) {
+
+          rejectedItems.push({
+            productId: item.productId,
+            productName: product.name,
+            reason: `Modifier ${modifierId} not found`,
+          });
+
+          invalidModifier = true;
+          break;
+        }
+
+        // Check modifier belongs to requested product
+
+        if (modifier.group.product.id !== product.id) {
+
+          rejectedItems.push({
+            productId: item.productId,
+            productName: product.name,
+            reason: `Modifier ${modifier.name} does not belong to ${product.name}`,
+          });
+
+          invalidModifier = true;
+          break;
+        }
+
+        // Check modifier group active status
+
+        if (!modifier.group.isActive) {
+
+          rejectedItems.push({
+            productId: item.productId,
+            productName: product.name,
+            reason: `Modifier group ${modifier.group.name} is inactive`,
+          });
+
+          invalidModifier = true;
+          break;
+        }
+
+        // Check modifier active status
+
+        if (!modifier.isActive) {
+
+          rejectedItems.push({
+            productId: item.productId,
+            productName: product.name,
+            reason: `Modifier ${modifier.name} is inactive`,
+          });
+
+          invalidModifier = true;
+          break;
+        }
+
+        selectedModifiers.push(modifier);
+      }
+
+      if (invalidModifier) {
+        continue;
+      }
+
+      // --------------------------------------------------
+      // 7. Validate modifier group selection rules
+      // --------------------------------------------------
+
+      const productGroups = modifierGroups.filter(
+        (group) => group.product.id === product.id,
+      );
+
+      let invalidGroup = false;
+
+      for (const group of productGroups) {
+
+        const selectedCount = selectedModifiers.filter(
+          (modifier) => modifier.group.id === group.id,
+        ).length;
+
+        const minimumRequired = group.isRequired
+          ? Math.max(group.minSelect, 1)
+          : group.minSelect;
+
+        if (selectedCount < minimumRequired) {
+
+          rejectedItems.push({
+            productId: item.productId,
+            productName: product.name,
+            reason: `Please select at least ${minimumRequired} modifier(s) from ${group.name}`,
+          });
+
+          invalidGroup = true;
+          break;
+        }
+
+        // maxSelect = 0 means unlimited
+
+        if (
+          group.maxSelect > 0 &&
+          selectedCount > group.maxSelect
+        ) {
+
+          rejectedItems.push({
+            productId: item.productId,
+            productName: product.name,
+            reason: `Maximum ${group.maxSelect} modifier(s) allowed in ${group.name}`,
+          });
+
+          invalidGroup = true;
+          break;
+        }
+      }
+
+      if (invalidGroup) {
+        continue;
+      }
+
+      // Product and modifiers passed validation
+
+      validItems.push({
+        product,
+        quantity: item.quantity,
+        modifiers: selectedModifiers,
+      });
+    }
+
+    // --------------------------------------------------
+    // 8. Validate combined stock for each product
+    // --------------------------------------------------
+
+    const productQuantityMap = new Map<number, number>();
+
+    for (const item of validItems) {
+
+      const quantity =
+        (productQuantityMap.get(item.product.id) ?? 0) +
+        item.quantity;
+
+      productQuantityMap.set(item.product.id, quantity);
+    }
+
+    const insufficientProducts = new Set<number>();
+
+    for (const [productId, quantity] of productQuantityMap) {
+
+      const product = productMap.get(productId)!;
+
+      if (product.stock < quantity) {
+
+        insufficientProducts.add(productId);
+
+        rejectedItems.push({
+          productId,
+          productName: product.name,
+          reason: `Insufficient stock for "${product.name}". Available Stock: ${product.stock}, Requested quantity: ${quantity}`,
+        });
+      }
+    }
+
+    // --------------------------------------------------
+    // 9. Calculate prices and create OrderItems
+    // --------------------------------------------------
+
+    for (const item of validItems) {
+
+      if (insufficientProducts.has(item.product.id)) {
+        continue;
+      }
+
+      const productPrice = Number(item.product.price);
+
+      // Calculate selected modifier price
+
+      const modifierTotal = item.modifiers.reduce(
+        (sum, modifier) => {
+
+          return sum + Number(modifier.priceAdjustment);
+
+        },
+        0,
+      );
+
+      // Product price + modifier prices
+
+      const unitPrice = Number(
+        (productPrice + modifierTotal).toFixed(2),
+      );
+
+      // Calculate item total
+
+      const itemTotal = Number(
+        (unitPrice * item.quantity).toFixed(2),
+      );
 
       total += itemTotal;
 
-  const newStock = product.stock - quantity;
+      // --------------------------------------------------
+      // 10. Create OrderItemModifier snapshots
+      // --------------------------------------------------
 
-product.stock = newStock;
+      const orderItemModifiers = item.modifiers.map(
+        (modifier) => {
 
-updatedProducts.push(product);
+          return manager.create(OrderItemModifier, {
 
+            modifier,
 
-      // Product passed all validations
-     // Create OrderItem entity
+            modifierName: modifier.name,
+
+            modifierPrice: modifier.priceAdjustment,
+
+          });
+
+        },
+      );
+
+      // --------------------------------------------------
+      // 11. Create OrderItem
+      // --------------------------------------------------
+
       const orderItem = manager.create(OrderItem, {
-        product,
-        quantity,
-        price,
+
+        product: item.product,
+
+        quantity: item.quantity,
+
+        price: unitPrice,
+
         total: itemTotal,
+
+        modifiers: orderItemModifiers,
+
       });
 
-      // Add to order items array
       orderItems.push(orderItem);
+    }
+
+    //  Update product stock
+
+    for (const [productId, quantity] of productQuantityMap) {
+
+      if (insufficientProducts.has(productId)) {
+        continue;
+      }
+
+      const product = productMap.get(productId)!;
+
+      product.stock = product.stock - quantity;
+
+      updatedProducts.push(product);
+    }
+
+    if (updatedProducts.length > 0) {
+
+      await manager.save(Product, updatedProducts);
 
     }
 
-if (updatedProducts.length > 0) {
-  await manager.save(Product, updatedProducts);
+    if (validItems.length === 0) {
+  throw new BadRequestException({
+    message: 'Order cannot be created because all items were rejected',
+    rejectedItems,
+  });
 }
 
-      //  Create Order
+    //  Create Order
     const order = manager.create(Order, {
+
       user,
-      total,
+
+      total: Number(total.toFixed(2)),
+
       status: OrderStatus.PENDING,
-      items: orderItems
+
+      items: orderItems,
+
     });
 
     //  Save Order + OrderItems
@@ -215,7 +552,20 @@ if (updatedProducts.length > 0) {
 
     const savedOrder = await manager.save(Order, order);
 
-    const result = OrderMapper.toResponse(savedOrder)
+    const completeOrder = await manager.findOneOrFail(Order, {
+  where: {
+    id: savedOrder.id,
+  },
+  relations: {
+    user: true,
+    items: {
+      product: true,
+      modifiers: true,
+    },
+  },
+});
+
+const result = OrderMapper.toResponse(completeOrder);
 
     //  Commit transaction
     await queryRunner.commitTransaction();

@@ -23,6 +23,12 @@ export class OrderMapper {
           name: item.product.name,
           price: item.product.price,
         },
+
+        modifiers: (item.modifiers ?? []).map((modifier) => ({
+          modifierId: modifier.id,
+          name: modifier.modifierName,
+          price: modifier.modifierPrice,
+        })),
       })),
 
       created_at: order.created_at,
